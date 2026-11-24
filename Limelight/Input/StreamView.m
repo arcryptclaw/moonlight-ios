@@ -17,6 +17,14 @@
 
 static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 
+// Three-finger media gestures (Settings.bundle "threeFingerGestures")
+static const short VK_MEDIA_PLAY_PAUSE_CODE = 0xB3;
+static const short VK_VOLUME_UP_CODE = 0xAF;
+static const short VK_VOLUME_DOWN_CODE = 0xAE;
+static const CGFloat MEDIA_GESTURE_MOVE_THRESHOLD = 12; // points before a tap becomes a slide
+static const CGFloat VOLUME_STEP_POINTS = 16; // points of slide per volume key press
+static const NSTimeInterval MEDIA_GESTURE_TAP_TIME = 0.5; // longest three-finger tap, in seconds
+
 @implementation StreamView {
     OnScreenControls* onScreenControls;
     
@@ -44,6 +52,15 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     BOOL hasUserInteracted;
     
     NSDictionary<NSString *, NSNumber *> *dictCodes;
+
+    BOOL mediaGestures;
+    BOOL mediaGestureActive;
+    BOOL mediaGestureMoved;
+    CGPoint mediaGestureStart;
+    CGFloat mediaGestureLastY;
+    CGFloat volumeTravel;
+    NSTimeInterval mediaGestureStartTime;
+    dispatch_queue_t mediaKeyQueue;
 }
 
 - (void) setupStreamView:(ControllerSupport*)controllerSupport
@@ -53,6 +70,15 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     self->streamAspectRatio = (float)streamConfig.width / (float)streamConfig.height;
     
     TemporarySettings* settings = [[[DataManager alloc] init] getSettings];
+
+#if TARGET_OS_TV
+    mediaGestures = NO;
+#else
+    // 0 (default) = media keys on three fingers and keyboard on four; 1 = keyboard on three fingers
+    mediaGestures = [[NSUserDefaults standardUserDefaults] integerForKey:@"threeFingerGestures"] == 0;
+#endif
+    mediaGestureActive = NO;
+    mediaKeyQueue = dispatch_queue_create("MediaKeyQueue", DISPATCH_QUEUE_SERIAL);
     
     keysDown = [[NSMutableSet alloc] init];
     keyInputField = [[KeyboardInputField alloc] initWithFrame:CGRectZero];
@@ -351,43 +377,121 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
         // is triggered.
         [touchHandler touchesBegan:touches withEvent:event];
         
-        if ([[event allTouches] count] == 3) {
-            if (isInputingText) {
-                Log(LOG_D, @"Closing the keyboard");
-                [keyInputField resignFirstResponder];
-                isInputingText = false;
-            } else {
-                Log(LOG_D, @"Opening the keyboard");
-                // Prepare the textbox used to capture keyboard events.
-                keyInputField.delegate = self;
-                keyInputField.text = @"0";
-#if !TARGET_OS_TV
-                // Prepare the toolbar above the keyboard for more options
-                UIToolbar *customToolbarView = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.bounds.size.width, 44)];
-                
-                UIBarButtonItem *doneBarButton = [self createButtonWithImageNamed:@"DoneIcon.png" backgroundColor:[UIColor clearColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x00 isToggleable:NO];
-                UIBarButtonItem *windowsBarButton = [self createButtonWithImageNamed:@"WindowsIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x5B isToggleable:YES];
-                UIBarButtonItem *tabBarButton = [self createButtonWithImageNamed:@"TabIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x09 isToggleable:NO];
-                UIBarButtonItem *shiftBarButton = [self createButtonWithImageNamed:@"ShiftIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA0 isToggleable:YES];
-                UIBarButtonItem *escapeBarButton = [self createButtonWithImageNamed:@"EscapeIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x1B isToggleable:NO];
-                UIBarButtonItem *controlBarButton = [self createButtonWithImageNamed:@"ControlIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA2 isToggleable:YES];
-                UIBarButtonItem *altBarButton = [self createButtonWithImageNamed:@"AltIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA4 isToggleable:YES];
-                UIBarButtonItem *deleteBarButton = [self createButtonWithImageNamed:@"DeleteIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x2E isToggleable:NO];
-                UIBarButtonItem *flexibleSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
-                
-                [customToolbarView setItems:[NSArray arrayWithObjects:doneBarButton, windowsBarButton, escapeBarButton, tabBarButton, shiftBarButton, controlBarButton, altBarButton, deleteBarButton, flexibleSpace, nil]];
-                keyInputField.inputAccessoryView = customToolbarView;
-#endif
-                [keyInputField becomeFirstResponder];
-                [keyInputField addTarget:self action:@selector(onKeyboardPressed:) forControlEvents:UIControlEventEditingChanged];
-                
-                // Undo causes issues for our state management, so turn it off
-                [keyInputField.undoManager disableUndoRegistration];
-                
-                isInputingText = true;
+        NSUInteger touchCount = [[event allTouches] count];
+        if (mediaGestures) {
+            // Three fingers are media keys, four fingers toggle the keyboard
+            if (touchCount == 3) {
+                [self beginMediaGesture:[event allTouches]];
+            }
+            else if (touchCount == 4) {
+                mediaGestureActive = NO;
+                [self toggleKeyboard];
+            }
+            else if (touchCount > 4) {
+                mediaGestureActive = NO;
             }
         }
+        else if (touchCount == 3) {
+            [self toggleKeyboard];
+        }
     }
+}
+
+- (void)toggleKeyboard {
+    if (isInputingText) {
+        Log(LOG_D, @"Closing the keyboard");
+        [keyInputField resignFirstResponder];
+        isInputingText = false;
+    } else {
+        Log(LOG_D, @"Opening the keyboard");
+        // Prepare the textbox used to capture keyboard events.
+        keyInputField.delegate = self;
+        keyInputField.text = @"0";
+#if !TARGET_OS_TV
+        // Prepare the toolbar above the keyboard for more options
+        UIToolbar *customToolbarView = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.bounds.size.width, 44)];
+        
+        UIBarButtonItem *doneBarButton = [self createButtonWithImageNamed:@"DoneIcon.png" backgroundColor:[UIColor clearColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x00 isToggleable:NO];
+        UIBarButtonItem *windowsBarButton = [self createButtonWithImageNamed:@"WindowsIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x5B isToggleable:YES];
+        UIBarButtonItem *tabBarButton = [self createButtonWithImageNamed:@"TabIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x09 isToggleable:NO];
+        UIBarButtonItem *shiftBarButton = [self createButtonWithImageNamed:@"ShiftIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA0 isToggleable:YES];
+        UIBarButtonItem *escapeBarButton = [self createButtonWithImageNamed:@"EscapeIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x1B isToggleable:NO];
+        UIBarButtonItem *controlBarButton = [self createButtonWithImageNamed:@"ControlIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA2 isToggleable:YES];
+        UIBarButtonItem *altBarButton = [self createButtonWithImageNamed:@"AltIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA4 isToggleable:YES];
+        UIBarButtonItem *deleteBarButton = [self createButtonWithImageNamed:@"DeleteIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x2E isToggleable:NO];
+        UIBarButtonItem *flexibleSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+        
+        [customToolbarView setItems:[NSArray arrayWithObjects:doneBarButton, windowsBarButton, escapeBarButton, tabBarButton, shiftBarButton, controlBarButton, altBarButton, deleteBarButton, flexibleSpace, nil]];
+        keyInputField.inputAccessoryView = customToolbarView;
+#endif
+        [keyInputField becomeFirstResponder];
+        [keyInputField addTarget:self action:@selector(onKeyboardPressed:) forControlEvents:UIControlEventEditingChanged];
+        
+        // Undo causes issues for our state management, so turn it off
+        [keyInputField.undoManager disableUndoRegistration];
+        
+        isInputingText = true;
+    }
+}
+
+- (CGPoint)centroidOfTouches:(NSSet*)touches {
+    CGPoint sum = CGPointZero;
+    for (UITouch* touch in touches) {
+        CGPoint location = [touch locationInView:self];
+        sum.x += location.x;
+        sum.y += location.y;
+    }
+    return touches.count > 0 ? CGPointMake(sum.x / touches.count, sum.y / touches.count) : sum;
+}
+
+- (void)sendMediaKey:(short)keyCode {
+    dispatch_async(mediaKeyQueue, ^{
+        LiSendKeyboardEvent(0x8000 | keyCode, KEY_ACTION_DOWN, 0);
+        usleep(20 * 1000);
+        LiSendKeyboardEvent(0x8000 | keyCode, KEY_ACTION_UP, 0);
+    });
+}
+
+- (void)beginMediaGesture:(NSSet*)allTouches {
+    mediaGestureActive = YES;
+    mediaGestureMoved = NO;
+    mediaGestureStart = [self centroidOfTouches:allTouches];
+    mediaGestureLastY = mediaGestureStart.y;
+    volumeTravel = 0;
+    mediaGestureStartTime = [NSDate timeIntervalSinceReferenceDate];
+}
+
+- (void)updateMediaGesture:(NSSet*)allTouches {
+    CGPoint centroid = [self centroidOfTouches:allTouches];
+    
+    if (!mediaGestureMoved &&
+        hypot(centroid.x - mediaGestureStart.x, centroid.y - mediaGestureStart.y) >= MEDIA_GESTURE_MOVE_THRESHOLD) {
+        // No longer a tap; count volume steps from here
+        mediaGestureMoved = YES;
+        mediaGestureLastY = centroid.y;
+    }
+    
+    if (mediaGestureMoved) {
+        // Sliding up raises the volume, sliding down lowers it
+        volumeTravel += mediaGestureLastY - centroid.y;
+        mediaGestureLastY = centroid.y;
+        while (volumeTravel >= VOLUME_STEP_POINTS) {
+            [self sendMediaKey:VK_VOLUME_UP_CODE];
+            volumeTravel -= VOLUME_STEP_POINTS;
+        }
+        while (volumeTravel <= -VOLUME_STEP_POINTS) {
+            [self sendMediaKey:VK_VOLUME_DOWN_CODE];
+            volumeTravel += VOLUME_STEP_POINTS;
+        }
+    }
+}
+
+- (void)endMediaGesture {
+    if (!mediaGestureMoved &&
+        [NSDate timeIntervalSinceReferenceDate] - mediaGestureStartTime < MEDIA_GESTURE_TAP_TIME) {
+        [self sendMediaKey:VK_MEDIA_PLAY_PAUSE_CODE];
+    }
+    mediaGestureActive = NO;
 }
 
 - (UIBarButtonItem *)createButtonWithImageNamed:(NSString *)imageName backgroundColor:(UIColor *)backgroundColor target:(id)target action:(SEL)action keyCode:(NSInteger)keyCode isToggleable:(BOOL)isToggleable {
@@ -543,6 +647,9 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     hasUserInteracted = YES;
     
     if (![onScreenControls handleTouchMovedEvent:touches]) {
+        if (mediaGestureActive && [[event allTouches] count] == 3) {
+            [self updateMediaGesture:[event allTouches]];
+        }
         [touchHandler touchesMoved:touches withEvent:event];
     }
 }
@@ -611,10 +718,16 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     
     if (![onScreenControls handleTouchUpEvent:touches]) {
         [touchHandler touchesEnded:touches withEvent:event];
+
+        // Finish a three-finger gesture once every finger has lifted
+        if (mediaGestureActive && [[event allTouches] count] == [touches count]) {
+            [self endMediaGesture];
+        }
     }
 }
 
 - (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
+    mediaGestureActive = NO;
     [touchHandler touchesCancelled:touches withEvent:event];
     [self handleMouseButtonEvent:BUTTON_ACTION_RELEASE
                       forTouches:touches

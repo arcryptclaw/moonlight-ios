@@ -248,7 +248,9 @@ BOOL isCustomResolution(CGSize res) {
     [self.framePacingSelector setSelectedSegmentIndex:currentSettings.useFramePacing ? 1 : 0];
     [self.multiControllerSelector setSelectedSegmentIndex:currentSettings.multiController ? 1 : 0];
     [self.swapABXYButtonsSelector setSelectedSegmentIndex:currentSettings.swapABXYButtons ? 1 : 0];
-    [self.audioOnPCSelector setSelectedSegmentIndex:currentSettings.playAudioOnPC ? 1 : 0];
+    // Play Audio On: 0 = iPad, 1 = PC (this device muted), 2 = Both
+    BOOL muteAudioOnDevice = [[NSUserDefaults standardUserDefaults] boolForKey:@"muteAudioOnDevice"];
+    [self.audioOnPCSelector setSelectedSegmentIndex:!currentSettings.playAudioOnPC ? 0 : (muteAudioOnDevice ? 1 : 2)];
     NSInteger onscreenControls = [currentSettings.onscreenControls integerValue];
     _lastSelectedResolutionIndex = resolution;
     [self.resolutionSelector setSelectedSegmentIndex:resolution];
@@ -531,7 +533,9 @@ BOOL isCustomResolution(CGSize res) {
     BOOL optimizeGames = [self.optimizeSettingsSelector selectedSegmentIndex] == 1;
     BOOL multiController = [self.multiControllerSelector selectedSegmentIndex] == 1;
     BOOL swapABXYButtons = [self.swapABXYButtonsSelector selectedSegmentIndex] == 1;
-    BOOL audioOnPC = [self.audioOnPCSelector selectedSegmentIndex] == 1;
+    NSInteger audioTarget = [self.audioOnPCSelector selectedSegmentIndex];
+    BOOL audioOnPC = audioTarget != 0;
+    [[NSUserDefaults standardUserDefaults] setBool:(audioTarget == 1) forKey:@"muteAudioOnDevice"];
     uint32_t preferredCodec = [self getChosenCodecPreference];
     BOOL btMouseSupport = [self.btMouseSelector selectedSegmentIndex] == 1;
     BOOL useFramePacing = [self.framePacingSelector selectedSegmentIndex] == 1;

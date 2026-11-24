@@ -52,6 +52,34 @@
 				<string>4×</string>
 			</array>
 		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>Gestures</string>
+			<key>FooterText</key>
+			<string>Media: tap with three fingers to play or pause, slide three fingers up or down to change the PC's volume, and tap with four fingers to show the keyboard. Keyboard: Moonlight's standard three-finger tap for the keyboard.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Three Fingers</string>
+			<key>Key</key>
+			<string>threeFingerGestures</string>
+			<key>DefaultValue</key>
+			<integer>0</integer>
+			<key>Values</key>
+			<array>
+				<integer>0</integer>
+				<integer>1</integer>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>Media</string>
+				<string>Keyboard</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

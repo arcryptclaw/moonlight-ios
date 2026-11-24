@@ -137,6 +137,11 @@ static NSString* const TOUCHPAD_SPEED_KEY = @"touchpadSpeed";
         
         originalLocation = touchLocation = CGPointMake((firstLocation.x + secondLocation.x) / 2, (firstLocation.y + secondLocation.y) / 2);
     }
+    else {
+        // Three or more fingers are gestures (media keys or keyboard), never a held click-drag
+        [dragTimer invalidate];
+        dragTimer = nil;
+    }
 }
 
 - (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event {

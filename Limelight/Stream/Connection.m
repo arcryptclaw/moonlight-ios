@@ -43,6 +43,11 @@ static OPUS_MULTISTREAM_CONFIGURATION audioConfig;
 static void* audioBuffer;
 static int audioFrameSize;
 
+// Set by "Play Audio On: PC" in settings: the PC keeps playing the sound
+// and this device stays silent
+static NSString* const MUTE_AUDIO_ON_DEVICE_KEY = @"muteAudioOnDevice";
+static BOOL audioMutedOnDevice;
+
 static VideoDecoderRenderer* renderer;
 
 int DrDecoderSetup(int videoFormat, int width, int height, int redrawRate, void* context, int drFlags)
@@ -211,7 +216,13 @@ int ArInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, v
 {
     int err;
     SDL_AudioSpec want, have;
-    
+
+    audioMutedOnDevice = [[NSUserDefaults standardUserDefaults] boolForKey:MUTE_AUDIO_ON_DEVICE_KEY];
+    if (audioMutedOnDevice) {
+        Log(LOG_I, @"Audio plays on the PC only; not opening a local audio device");
+        return 0;
+    }
+
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
         Log(LOG_E, @"Failed to initialize audio subsystem: %s\n", SDL_GetError());
         return -1;
@@ -276,14 +287,20 @@ void ArCleanup(void)
         SDL_free(audioBuffer);
         audioBuffer = NULL;
     }
-    
-    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+
+    if (!audioMutedOnDevice) {
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    }
 }
 
 void ArDecodeAndPlaySample(char* sampleData, int sampleLength)
 {
     int decodeLen;
-    
+
+    if (audioMutedOnDevice) {
+        return;
+    }
+
     // Don't queue if there's already more than 30 ms of audio data waiting
     // in Moonlight's audio queue.
     if (LiGetPendingAudioDuration() > 30) {
