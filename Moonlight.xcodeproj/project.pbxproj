@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7C0A11E5000000000000A001 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 7C0A11E5000000000000A002 /* Settings.bundle */; };
 		693B3A9B218638CD00982F7B /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 693B3A9A218638CD00982F7B /* Settings.bundle */; };
 		98181BE92791277400E43572 /* libSDL2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 98181BE82791275D00E43572 /* libSDL2.a */; };
 		98181BEB2791278F00E43572 /* libSDL2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 98181BEA2791278300E43572 /* libSDL2.a */; };
@@ -170,6 +171,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		7C0A11E5000000000000A002 /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		566E9D2B2770B23A00EF7BFE /* Moonlight v1.7.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = "Moonlight v1.7.xcdatamodel"; sourceTree = "<group>"; };
 		693B3A9A218638CD00982F7B /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		9803CCAB254F9EAF00EE185E /* ConnectionCallbacks.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ConnectionCallbacks.h; sourceTree = "<group>"; };
@@ -464,6 +466,7 @@
 				FB290E7A19B38036004C83CF /* iPhone.storyboard */,
 				FB89463719F6473800339C8A /* Launch Screen.xib */,
 				FB290D0819B2C406004C83CF /* Images.xcassets */,
+				7C0A11E5000000000000A002 /* Settings.bundle */,
 				FB290D0519B2C406004C83CF /* Limelight.xcdatamodeld */,
 				FB1D59951BBCCB6400F482CA /* ComputerScrollView.h */,
 				FB1D59961BBCCB6400F482CA /* ComputerScrollView.m */,
@@ -821,6 +824,7 @@
 				FB290CFE19B2C406004C83CF /* InfoPlist.strings in Resources */,
 				FB290E7B19B38036004C83CF /* iPhone.storyboard in Resources */,
 				FB290D0919B2C406004C83CF /* Images.xcassets in Resources */,
+				7C0A11E5000000000000A001 /* Settings.bundle in Resources */,
 				FB89463819F6473800339C8A /* Launch Screen.xib in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

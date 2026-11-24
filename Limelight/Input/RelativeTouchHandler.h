@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface RelativeTouchHandler : UIResponder
 
 -(id)initWithView:(StreamView*)view;
+-(id)initWithView:(StreamView*)view streamConfig:(nullable StreamConfiguration*)streamConfig;
 
 @end
 

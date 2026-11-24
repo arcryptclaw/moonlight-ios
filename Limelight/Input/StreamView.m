@@ -71,7 +71,7 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
         self->touchHandler = [[AbsoluteTouchHandler alloc] initWithView:self];
     }
     else {
-        self->touchHandler = [[RelativeTouchHandler alloc] initWithView:self];
+        self->touchHandler = [[RelativeTouchHandler alloc] initWithView:self streamConfig:streamConfig];
     }
     
     onScreenControls = [[OnScreenControls alloc] initWithView:self controllerSup:controllerSupport streamConfig:streamConfig];

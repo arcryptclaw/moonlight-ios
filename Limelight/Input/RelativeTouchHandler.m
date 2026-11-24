@@ -13,13 +13,23 @@
 static const int REFERENCE_WIDTH = 1280;
 static const int REFERENCE_HEIGHT = 720;
 
+// Pointer speed for touchpad mode, chosen in the iOS Settings app (Settings.bundle).
+// 1.0 moves the host cursor exactly as far as the finger travels across the video
+// on screen, when the host desktop runs at the stream resolution. A negative value
+// keeps Moonlight's original 1280x720 reference scaling.
+static NSString* const TOUCHPAD_SPEED_KEY = @"touchpadSpeed";
+
 @implementation RelativeTouchHandler {
     CGPoint touchLocation, originalLocation;
     BOOL touchMoved;
     BOOL isDragging;
     NSTimer* dragTimer;
     NSUInteger peakTouchCount;
-    
+
+    int streamWidth, streamHeight;
+    double touchpadSpeed;
+    double remainderX, remainderY;
+
 #if TARGET_OS_TV
     UIGestureRecognizer* remotePressRecognizer;
     UIGestureRecognizer* remoteLongPressRecognizer;
@@ -29,9 +39,16 @@ static const int REFERENCE_HEIGHT = 720;
 }
 
 - (id)initWithView:(StreamView*)view {
+    return [self initWithView:view streamConfig:nil];
+}
+
+- (id)initWithView:(StreamView*)view streamConfig:(StreamConfiguration*)streamConfig {
     self = [self init];
     self->view = view;
-    
+    self->streamWidth = streamConfig != nil ? streamConfig.width : 0;
+    self->streamHeight = streamConfig != nil ? streamConfig.height : 0;
+    [self refreshTouchpadSpeed];
+
 #if TARGET_OS_TV
     remotePressRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(remoteButtonPressed:)];
     remotePressRecognizer.allowedPressTypes = @[@(UIPressTypeSelect)];
@@ -44,6 +61,46 @@ static const int REFERENCE_HEIGHT = 720;
 #endif
     
     return self;
+}
+
+- (void)refreshTouchpadSpeed {
+    double speed = [[NSUserDefaults standardUserDefaults] doubleForKey:TOUCHPAD_SPEED_KEY];
+    touchpadSpeed = (speed == 0) ? 1.0 : speed;
+}
+
+- (void)sendRelativeMoveFrom:(CGPoint)from to:(CGPoint)to {
+    CGSize bounds = view.bounds.size;
+    double scaleX, scaleY;
+
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        return;
+    }
+
+    if (touchpadSpeed < 0 || streamWidth <= 0 || streamHeight <= 0) {
+        // Original scaling: the whole view maps to a 1280x720 reference area
+        scaleX = REFERENCE_WIDTH / bounds.width;
+        scaleY = REFERENCE_HEIGHT / bounds.height;
+    }
+    else {
+        // The video is aspect-fit inside the view. One point of finger travel covers
+        // streamWidth / videoWidth stream pixels on both axes, so at speed 1.0 the
+        // cursor follows the finger across the picture.
+        double streamAspect = (double)streamWidth / (double)streamHeight;
+        double videoWidth = (bounds.width > bounds.height * streamAspect) ? bounds.height * streamAspect : bounds.width;
+        scaleX = scaleY = (streamWidth / videoWidth) * touchpadSpeed;
+    }
+
+    // Keep the fractional part between events so slow, fine movements are not lost
+    remainderX += (to.x - from.x) * scaleX;
+    remainderY += (to.y - from.y) * scaleY;
+    int deltaX = (int)remainderX;
+    int deltaY = (int)remainderY;
+
+    if (deltaX != 0 || deltaY != 0) {
+        remainderX -= deltaX;
+        remainderY -= deltaY;
+        LiSendMouseMoveEvent(deltaX, deltaY);
+    }
 }
 
 - (BOOL)isConfirmedMove:(CGPoint)currentPoint from:(CGPoint)originalPoint {
@@ -60,6 +117,8 @@ static const int REFERENCE_HEIGHT = 720;
 
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
     touchMoved = false;
+    remainderX = remainderY = 0;
+    [self refreshTouchpadSpeed];
     peakTouchCount = [[event allTouches] count];
     if ([[event allTouches] count] == 1) {
         UITouch *touch = [[event allTouches] anyObject];
@@ -88,18 +147,13 @@ static const int REFERENCE_HEIGHT = 720;
         if (touchLocation.x != currentLocation.x ||
             touchLocation.y != currentLocation.y)
         {
-            int deltaX = (currentLocation.x - touchLocation.x) * (REFERENCE_WIDTH / view.bounds.size.width);
-            int deltaY = (currentLocation.y - touchLocation.y) * (REFERENCE_HEIGHT / view.bounds.size.height);
-            
-            if (deltaX != 0 || deltaY != 0) {
-                LiSendMouseMoveEvent(deltaX, deltaY);
-                touchLocation = currentLocation;
-                
-                // If we've moved far enough to confirm this wasn't just human/machine error,
-                // mark it as such.
-                if ([self isConfirmedMove:touchLocation from:originalLocation]) {
-                    touchMoved = true;
-                }
+            [self sendRelativeMoveFrom:touchLocation to:currentLocation];
+            touchLocation = currentLocation;
+
+            // If we've moved far enough to confirm this wasn't just human/machine error,
+            // mark it as such.
+            if ([self isConfirmedMove:touchLocation from:originalLocation]) {
+                touchMoved = true;
             }
         }
     } else if ([[event allTouches] count] == 2) {
@@ -163,7 +217,8 @@ static const int REFERENCE_HEIGHT = 720;
         [activeSet unionSet:[event allTouches]];
         [activeSet minusSet:touches];
         touchLocation = [[activeSet anyObject] locationInView:view];
-        
+        remainderX = remainderY = 0;
+
         // Mark this touch as moved so we don't send a left mouse click if the user
         // right clicks without moving their other finger.
         touchMoved = true;
